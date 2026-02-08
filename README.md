@@ -1,37 +1,58 @@
-# cameraDisplay
-Developed under Arduino IDE 2.3.7
-library:
-	esp-arduino-libs/ESP32_USB_STREAM@^0.1.0
-	bitbank2/bb_spi_lcd@^2.9.7
-	bitbank2/JPEGDEC@^1.8.4
-Hardware:
+# 📷 cameraDisplay
 
-wemos s2 mini + gmt020 + power bank module +102540 battery
+A portable USB camera display solution developed under **Arduino IDE 2.3.7**. This project allows you to plug a UVC camera into an ESP32-S2 and display the live feed on a small TFT screen.
 
-Pin:
+## 📺 Demo & Preview
+[![Watch the video](https://img.youtube.com/vi/0k7rjw5rCmI/maxresdefault.jpg)](https://www.youtube.com/shorts/0k7rjw5rCmI)
+*Check out the 3D models on my [Thingiverse](https://www.thingiverse.com/) page.*
 
-#define TFT_MOSI 35  
-#define TFT_SCLK 36  
-#define TFT_CS 34    
-#define TFT_DC 39    
-#define TFT_RST 40   
-#define LED_FRAME_IND 15
+---
 
-!!important
-Need to use the arduino_config.h to replace the ~\Arduino\libraries\ESP32_USB_STREAM\src\original\include\arduino_config.h
-At monument only support UVC mjpeg 320x240 format
+## 🛠 Hardware Requirement
 
-Aim:
+| Component | Specification |
+| :--- | :--- |
+| **Microcontroller** | Wemos S2 Mini (ESP32-S2) |
+| **Display** | GMT020 (TFT LCD) |
+| **Power** | Power bank module + 102540 Li-ion Battery |
 
- make a battery powered screen can
- 1. plug usb camera and display the image
- 
-TODO:
- 1. OTA
- 2. can stream in/out with wifi or ESPNOW
- 3. add tf card and can record/ play from sdCard
+### Pin Mapping
+| Function | GPIO Pin |
+| :--- | :--- |
+| `TFT_MOSI` | 35 |
+| `TFT_SCLK` | 36 |
+| `TFT_CS` | 34 |
+| `TFT_DC` | 39 |
+| `TFT_RST` | 40 |
+| `LED_FRAME_IND`| 15 |
 
+---
 
-You can check my https://www.thingiverse.com/ page for the model preview
+## 📚 Libraries Used
+- `esp-arduino-libs/ESP32_USB_STREAM @ ^0.1.0`
+- `bitbank2/bb_spi_lcd @ ^2.9.7`
+- `bitbank2/JPEGDEC @ ^1.8.4`
 
-[![preview](https://img.youtube.com/vi/0k7rjw5rCmI/maxresdefault.jpg)](https://www.youtube.com/shorts/0k7rjw5rCmI)
+---
+
+## ⚠️ Important Installation Steps
+
+> [!IMPORTANT]
+> You **MUST** replace the original configuration file to enable the USB stream:
+> 
+> **Replace:** `~\Arduino\libraries\ESP32_USB_STREAM\src\original\include\arduino_config.h`
+> **With:** The `arduino_config.h` provided in this repository.
+
+**Current Limitations:**
+- Currently only supports **UVC MJPEG 320x240** format.
+
+---
+
+## 🎯 Project Goals
+- [x] Battery-powered portable screen.
+- [x] Plug-and-play USB camera image display.
+
+## 📝 TODO List
+- [ ] **OTA:** Support Over-the-Air updates.
+- [ ] **Wireless:** Stream in/out via Wi-Fi or ESP-NOW.
+- [ ] **Storage:** Add TF card support for recording and playback.
