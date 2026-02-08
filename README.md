@@ -18,7 +18,8 @@ Pin:
 #define LED_FRAME_IND 15
 
 !!important
-need to use the arduino_config.h to replace the ~\Arduino\libraries\ESP32_USB_STREAM\src\original\include\arduino_config.h
+Need to use the arduino_config.h to replace the ~\Arduino\libraries\ESP32_USB_STREAM\src\original\include\arduino_config.h
+At monument only support UVC mjpeg 320x240 format
 
 Aim:
 
