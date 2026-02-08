@@ -30,4 +30,7 @@ TODO:
  2. can stream in/out with wifi or ESPNOW
  3. add tf card and can record/ play from sdCard
 
+
 You can check my https://www.thingiverse.com/ page for the model preview
+
+[![preview](https://img.youtube.com/vi/0k7rjw5rCmI/maxresdefault.jpg)](https://www.youtube.com/shorts/0k7rjw5rCmI)
