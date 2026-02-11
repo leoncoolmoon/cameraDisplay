@@ -115,7 +115,9 @@ void setup() {
   USB_STREAM *usb = new USB_STREAM();
   Serial.println("init USB");
   lcd.begin(LCD_ST7789, FLAGS_NONE, SPI_FREQUENCY, TFT_CS, TFT_DC, TFT_RST, TFT_BL, TFT_MISO, TFT_MOSI, TFT_SCLK);
-
+  lcd.setFont(FONT_6x8);
+  lcd.setTextColor(TFT_GREEN, TFT_BLACK);
+  lcd.setCursor(20, 20);
   Serial.println("init LCD");
   //  lcd.begin(LCD_ST7789_135, FLAGS_NONE, 40000000, 7, 39, 40, 45, 37, 35, 36);
   lcd.fillScreen(TFT_BLACK);
