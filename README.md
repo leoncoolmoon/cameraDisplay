@@ -5,7 +5,8 @@ A portable USB camera display solution developed under **Arduino IDE 2.3.7**. Th
 ## 📺 Demo & Preview
 [![Watch the video](https://img.youtube.com/vi/0k7rjw5rCmI/maxresdefault.jpg)](https://www.youtube.com/shorts/0k7rjw5rCmI)
 *Check out the 3D models on my [Thingiverse](https://www.thingiverse.com/thing:7290425) page.*
-
+The current design can continually run on battery for over 1 hour.
+Ideal for USB cameras with low resolutions. i.e.,a thermal camera like Haikang 4117 as per demo
 ---
 
 ## 🛠 Hardware Requirement
