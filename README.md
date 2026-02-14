@@ -16,6 +16,7 @@ Ideal for USB cameras with low resolutions. i.e.,a thermal camera like Haikang 4
 | **Microcontroller** | Wemos S2 Mini (ESP32-S2) |
 | **Display** | GMT020 (TFT LCD) |
 | **Power** | Power bank module + 102540 Li-ion Battery |
+| **Switch**| SS12F15VG5 5MM/3MM |
 
 ### Pin Mapping
 | Function | GPIO Pin |
