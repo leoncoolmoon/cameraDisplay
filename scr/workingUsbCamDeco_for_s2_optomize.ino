@@ -2,6 +2,8 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
+#include <LittleFS.h>
+#include <Update.h>
 #include <bb_spi_lcd.h>
 #include "JPEGDEC.h"
 #include "USB_STREAM.h"
@@ -65,6 +67,24 @@ const char *ssid = "ESP32-Camera-AP";
 IPAddress apIP(192.168.4.1);
 DNSServer dnsServer;
 WebServer server(80);
+bool wifiEnabled = true;
+
+// GPIO 0 Button
+#define BUTTON_PIN 0
+unsigned long buttonPressTime = 0;
+bool lastButtonState = HIGH;
+
+// Default embedded webpage
+const char* DEFAULT_INDEX_HTML =
+"<html><head><title>ESP32 Camera Stream</title></head><body>"
+"<h1>ESP32 Camera Stream (Default)</h1>"
+"<img src=\"/stream\" style=\"width:100%; max-width:640px;\">"
+"<br><hr><h3>File Management</h3>"
+"<form method='POST' action='/upload' enctype='multipart/form-data'>Upload index.html/QRcode.jpg: <input type='file' name='upload'><input type='submit' value='Upload'></form>"
+"<form method='POST' action='/delete'>Delete file: <input type='text' name='filename'><input type='submit' value='Delete'></form>"
+"<br><hr><h3>OTA Update</h3>"
+"<form method='POST' action='/update' enctype='multipart/form-data'>Firmware: <input type='file' name='update'><input type='submit' value='Update'></form>"
+"</body></html>";
 
 // Shared frame buffer for Web Server
 uint8_t *webFrameBuffer = NULL;
@@ -87,11 +107,69 @@ int drawMCUs(JPEGDRAW *pDraw) {
 }
 
 void handleRoot() {
-  String html = "<html><head><title>ESP32 Camera Stream</title></head><body>"
-                "<h1>ESP32 Camera Stream</h1>"
-                "<img src=\"/stream\" style=\"width:100%; max-width:640px;\">"
-                "</body></html>";
-  server.send(200, "text/html", html);
+  if (LittleFS.exists("/index.html")) {
+    File file = LittleFS.open("/index.html", "r");
+    server.streamFile(file, "text/html");
+    file.close();
+  } else {
+    server.send(200, "text/html", DEFAULT_INDEX_HTML);
+  }
+}
+
+void handleFileUpload() {
+  HTTPUpload& upload = server.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    String filename = upload.filename;
+    if (filename != "index.html" && filename != "QRcode.jpg") {
+       Serial.println("Invalid filename: " + filename);
+       return;
+    }
+    File file = LittleFS.open("/" + filename, "w");
+    file.close();
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (upload.filename != "index.html" && upload.filename != "QRcode.jpg") return;
+    File file = LittleFS.open("/" + upload.filename, "a");
+    file.write(upload.buf, upload.currentSize);
+    file.close();
+  } else if (upload.status == UPLOAD_FILE_END) {
+    server.send(200, "text/plain", "File Uploaded: " + upload.filename);
+  }
+}
+
+void handleFileDelete() {
+  String filename = server.arg("filename");
+  if (LittleFS.exists("/" + filename)) {
+    LittleFS.remove("/" + filename);
+    server.send(200, "text/plain", "File Deleted");
+  } else {
+    server.send(404, "text/plain", "File Not Found");
+  }
+}
+
+void handleUpdate() {
+  server.sendHeader("Connection", "close");
+  server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
+  ESP.restart();
+}
+
+void handleUpdateUpload() {
+  HTTPUpload& upload = server.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    Serial.printf("Update: %s\n", upload.filename.c_str());
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      Update.printError(Serial);
+    }
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+      Update.printError(Serial);
+    }
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (Update.end(true)) {
+      Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
+    } else {
+      Update.printError(Serial);
+    }
+  }
 }
 
 void handleStream() {
@@ -102,6 +180,21 @@ void handleStream() {
 
   while (client.connected()) {
     dnsServer.processNextRequest();
+
+    // Allow button logic to run during streaming
+    bool currentButtonState = digitalRead(BUTTON_PIN);
+    if (lastButtonState == HIGH && currentButtonState == LOW) {
+      buttonPressTime = millis();
+    } else if (lastButtonState == LOW && currentButtonState == HIGH) {
+      unsigned long duration = millis() - buttonPressTime;
+      if (duration >= 5000) {
+        Serial.println("Force format from stream loop...");
+        LittleFS.format();
+        ESP.restart();
+      }
+    }
+    lastButtonState = currentButtonState;
+
     if (webFrameBuffer != NULL && webFrameLen > 0) {
       xSemaphoreTake(frameMutex, portMAX_DELAY);
       client.printf("--frame\r\n"
@@ -120,7 +213,29 @@ void handleNotFound() {
   server.send(302, "text/plain", "");
 }
 
+void drawJPEGFromFS(const char* path) {
+  if (LittleFS.exists(path)) {
+    File file = LittleFS.open(path, "r");
+    size_t size = file.size();
+    uint8_t* buf = (uint8_t*)malloc(size);
+    if (buf) {
+      file.read(buf, size);
+      if (jpeg.openRAM(buf, size, drawMCUs)) {
+        jpeg.setPixelType(RGB565_BIG_ENDIAN);
+        jpeg.decode(0, 0, 0);
+        jpeg.close();
+      }
+      free(buf);
+    }
+    file.close();
+  }
+}
+
 static void onCameraFrameCallback(uvc_frame *frame, void *user_ptr) {
+  if (wifiEnabled && WiFi.softAPgetStationNum() == 0) {
+    // Skip camera display if showing QR Code
+    return;
+  }
   Serial.println(">>> FRAME RECEIVED <<<");
   Serial.printf("Size: %dx%d, Bytes: %u\n",
                 frame->width, frame->height, frame->data_bytes);
@@ -163,9 +278,20 @@ void setup() {
   // Initialize DNS Server
   dnsServer.start(53, "*", apIP);
 
+  // Initialize LittleFS
+  if (!LittleFS.begin(true)) {
+    Serial.println("LittleFS Mount Failed");
+  }
+
+  // Initialize GPIO 0
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
   // Initialize Web Server
   server.on("/", handleRoot);
   server.on("/stream", handleStream);
+  server.on("/upload", HTTP_POST, []() { /* server.send is handled in handleFileUpload UPLOAD_FILE_END */ }, handleFileUpload);
+  server.on("/delete", HTTP_POST, handleFileDelete);
+  server.on("/update", HTTP_POST, handleUpdate, handleUpdateUpload);
   server.onNotFound(handleNotFound);
   server.begin();
   Serial.println("HTTP server started");
@@ -241,9 +367,54 @@ void setup() {
   // free(_frameBuffer);
 }
 
+bool showingQRCode = false;
+
 void loop() {
-  dnsServer.processNextRequest();
-  server.handleClient();
+  if (wifiEnabled && WiFi.softAPgetStationNum() == 0) {
+    if (!showingQRCode) {
+      lcd.fillScreen(TFT_BLACK);
+      lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+      lcd.setFont(FONT_12x16);
+      lcd.setCursor(10, 10);
+      lcd.printf("SSID: %s", ssid);
+      drawJPEGFromFS("/QRcode.jpg");
+      showingQRCode = true;
+    }
+  } else {
+    showingQRCode = false;
+  }
+
+  // GPIO 0 Button Logic
+  bool currentButtonState = digitalRead(BUTTON_PIN);
+  if (lastButtonState == HIGH && currentButtonState == LOW) {
+    buttonPressTime = millis();
+  } else if (lastButtonState == LOW && currentButtonState == HIGH) {
+    unsigned long duration = millis() - buttonPressTime;
+    if (duration < 5000) {
+      // Short press: Toggle WiFi
+      wifiEnabled = !wifiEnabled;
+      if (wifiEnabled) {
+        WiFi.softAP(ssid);
+        dnsServer.start(53, "*", apIP);
+        Serial.println("WiFi AP Enabled");
+      } else {
+        WiFi.softAPdisconnect(true);
+        dnsServer.stop();
+        Serial.println("WiFi AP Disabled");
+      }
+    } else {
+      // Long press: Format LittleFS and Reboot
+      Serial.println("Formatting LittleFS...");
+      LittleFS.format();
+      ESP.restart();
+    }
+  }
+  lastButtonState = currentButtonState;
+
+  if (wifiEnabled) {
+    dnsServer.processNextRequest();
+    server.handleClient();
+  }
   //static int count = 0;
   //Serial.printf("Loop %d\n", count++);
   Serial.printf(".");
