@@ -1,8 +1,12 @@
 #include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <DNSServer.h>
 #include <bb_spi_lcd.h>
 #include "JPEGDEC.h"
 #include "USB_STREAM.h"
 #include "pin.h"
+
 /*lib
 	esp-arduino-libs/ESP32_USB_STREAM@^0.1.0
 	bitbank2/bb_spi_lcd@^2.9.7
@@ -56,6 +60,17 @@ JPEGDEC jpeg;
 BB_SPI_LCD lcd;
 bool ledup;
 
+// WiFi and WebServer
+const char *ssid = "ESP32-Camera-AP";
+IPAddress apIP(192.168.4.1);
+DNSServer dnsServer;
+WebServer server(80);
+
+// Shared frame buffer for Web Server
+uint8_t *webFrameBuffer = NULL;
+size_t webFrameLen = 0;
+SemaphoreHandle_t frameMutex = NULL;
+
 //位移
 #define DRAW_Y 0  //40
 #define DRAW_X 0  //7
@@ -71,6 +86,40 @@ int drawMCUs(JPEGDRAW *pDraw) {
   return 1;
 }
 
+void handleRoot() {
+  String html = "<html><head><title>ESP32 Camera Stream</title></head><body>"
+                "<h1>ESP32 Camera Stream</h1>"
+                "<img src=\"/stream\" style=\"width:100%; max-width:640px;\">"
+                "</body></html>";
+  server.send(200, "text/html", html);
+}
+
+void handleStream() {
+  WiFiClient client = server.client();
+  String response = "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
+  client.print(response);
+
+  while (client.connected()) {
+    dnsServer.processNextRequest();
+    if (webFrameBuffer != NULL && webFrameLen > 0) {
+      xSemaphoreTake(frameMutex, portMAX_DELAY);
+      client.printf("--frame\r\n"
+                     "Content-Type: image/jpeg\r\n"
+                     "Content-Length: %u\r\n\r\n", webFrameLen);
+      client.write(webFrameBuffer, webFrameLen);
+      client.print("\r\n");
+      xSemaphoreGive(frameMutex);
+    }
+    vTaskDelay(pdMS_TO_TICKS(50)); // ~20fps max
+  }
+}
+
+void handleNotFound() {
+  server.sendHeader("Location", "/", true);
+  server.send(302, "text/plain", "");
+}
+
 static void onCameraFrameCallback(uvc_frame *frame, void *user_ptr) {
   Serial.println(">>> FRAME RECEIVED <<<");
   Serial.printf("Size: %dx%d, Bytes: %u\n",
@@ -82,6 +131,18 @@ static void onCameraFrameCallback(uvc_frame *frame, void *user_ptr) {
     jpeg.decode(DRAW_Y, DRAW_X, DEC_PREM);
     jpeg.close();
   }
+
+  // Update shared buffer for Web Server
+  if (frameMutex != NULL && webFrameBuffer != NULL) {
+    if (xSemaphoreTake(frameMutex, 0) == pdTRUE) {
+      // Bounds check to prevent buffer overflow (webFrameBuffer is 64KB)
+      if (frame->data_bytes <= 64 * 1024) {
+        memcpy(webFrameBuffer, frame->data, frame->data_bytes);
+        webFrameLen = frame->data_bytes;
+      }
+      xSemaphoreGive(frameMutex);
+    }
+  }
 }
 
 void setup() {
@@ -92,7 +153,30 @@ void setup() {
   //Serial.printf("Min Free Heap: %d bytes\n", esp_get_minimum_free_heap_size());
   pinMode(LED_FRAME_IND, OUTPUT);
 
+  // Initialize WiFi AP
+  WiFi.mode(WIFI_AP);
+  WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+  WiFi.softAP(ssid);
+  Serial.print("AP IP address: ");
+  Serial.println(WiFi.softAPIP());
 
+  // Initialize DNS Server
+  dnsServer.start(53, "*", apIP);
+
+  // Initialize Web Server
+  server.on("/", handleRoot);
+  server.on("/stream", handleStream);
+  server.onNotFound(handleNotFound);
+  server.begin();
+  Serial.println("HTTP server started");
+
+  // Initialize Shared Buffer and Mutex
+  frameMutex = xSemaphoreCreateMutex();
+  // Using 64KB for webFrameBuffer as per CONFIG_UVC_MAX_FRAME_BUFFER_SIZE in arduino_config.h
+  webFrameBuffer = (uint8_t *)malloc(64 * 1024);
+  if (webFrameBuffer == NULL) {
+    Serial.println("Failed to allocate webFrameBuffer!");
+  }
 
 #ifdef ARDUINO_USB_MODE
   Serial.printf("ARDUINO_USB_MODE defined: %d\n", ARDUINO_USB_MODE);
@@ -158,8 +242,10 @@ void setup() {
 }
 
 void loop() {
+  dnsServer.processNextRequest();
+  server.handleClient();
   //static int count = 0;
   //Serial.printf("Loop %d\n", count++);
   Serial.printf(".");
-  vTaskDelay(100);
+  vTaskDelay(pdMS_TO_TICKS(10));
 }
