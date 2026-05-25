@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ESP32 Camera</title>
+
+<style>
+  :root {
+    --bg:#ffffff;
+    --fg:#111111;
+    --accent:#007aff;
+    --dim:#888;
+    --card:#f2f2f2;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0d0d0d;
+      --fg:#e8e8e8;
+      --accent:#00e5ff;
+      --dim:#444;
+      --card:#1a1a1a;
+    }
+  }
+
+  * { box-sizing:border-box; margin:0; padding:0; }
+
+  body {
+    background:var(--bg);
+    color:var(--fg);
+    font-family:monospace;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    min-height:100vh;
+    padding:16px;
+    gap:12px;
+  }
+
+  h1 {
+    font-size:1rem;
+    letter-spacing:.2em;
+    color:var(--accent);
+    text-transform:uppercase;
+    margin-top:8px;
+  }
+
+  #stream-wrap {
+    position:relative;
+    width:100%;
+    max-width:640px;
+  }
+
+  #stream {
+    width:100%;
+    display:block;
+    border:1px solid var(--dim);
+  }
+
+  #overlay {
+    display:none;
+    position:absolute;
+    inset:0;
+    background:rgba(0,0,0,.75);
+    color:var(--accent);
+    font-size:.9rem;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    padding:16px;
+  }
+
+  #overlay.show { display:flex; }
+
+  section {
+    width:100%;
+    max-width:640px;
+    border:1px solid var(--dim);
+    background:var(--card);
+    padding:12px;
+  }
+
+  section h2 {
+    font-size:.75rem;
+    color:var(--dim);
+    letter-spacing:.15em;
+    text-transform:uppercase;
+    margin-bottom:10px;
+  }
+
+  .row {
+    display:flex;
+    gap:8px;
+    align-items:center;
+    flex-wrap:wrap;
+    margin-bottom:8px;
+  }
+
+  input[type=file], input[type=text] {
+    background:transparent;
+    border:1px solid var(--dim);
+    color:var(--fg);
+    padding:4px 8px;
+    font-family:monospace;
+    font-size:.85rem;
+    flex:1;
+  }
+
+  button {
+    background:transparent;
+    border:1px solid var(--accent);
+    color:var(--accent);
+    padding:4px 14px;
+    font-family:monospace;
+    font-size:.85rem;
+    cursor:pointer;
+  }
+
+  button:hover {
+    background:var(--accent);
+    color:var(--bg);
+  }
+
+  #status {
+    font-size:.75rem;
+    color:var(--dim);
+    min-height:1.2em;
+  }
+</style>
+</head>
+
+<body>
+
+<h1 id="title">ESP32 · Camera</h1>
+
+<div id="stream-wrap">
+  <img id="stream" src="/stream">
+  <div id="overlay"></div>
+</div>
+
+<section>
+  <h2 id="file-title">File</h2>
+  <div class="row">
+    <input type="file" id="file-input" accept=".html,.jpg">
+    <button onclick="uploadFile()" id="btn-upload">Upload</button>
+  </div>
+  <div class="row">
+    <input type="text" id="del-name">
+    <button onclick="deleteFile()" id="btn-delete">Delete</button>
+  </div>
+</section>
+
+<section>
+  <h2 id="ota-title">OTA Firmware</h2>
+  <div class="row">
+    <input type="file" id="fw-input" accept=".bin">
+    <button onclick="uploadFirmware()" id="btn-flash">Flash</button>
+  </div>
+</section>
+
+<div id="status"></div>
+
+<script>
+const overlay = document.getElementById('overlay');
+const status  = document.getElementById('status');
+
+const LANG = navigator.language.startsWith('zh') ? 'zh' : 'en';
+
+const TEXT = {
+  zh: {
+    file: "文件",
+    ota: "固件升级",
+    upload: "上传",
+    del: "删除",
+    flash: "刷入",
+    selectFile: "请选择文件",
+    invalidFile: "仅支持 index.html 或 QRcode.jpg",
+    uploading: "上传中，请稍候…",
+    uploadFail: "上传失败: ",
+    enterName: "请输入文件名",
+    deleteFail: "删除失败: ",
+    selectFirmware: "请选择固件文件",
+    otaUploading: "OTA 上传中，请勿关闭页面…",
+    otaFail: "OTA 失败: ",
+    rebooting: "设备重启中，请稍后刷新页面",
+    success: "固件升级成功"
+  },
+  en: {
+    file: "File",
+    ota: "Firmware",
+    upload: "Upload",
+    del: "Delete",
+    flash: "Flash",
+    selectFile: "Select a file",
+    invalidFile: "Only index.html or QRcode.jpg allowed",
+    uploading: "Uploading...",
+    uploadFail: "Upload failed: ",
+    enterName: "Enter filename",
+    deleteFail: "Delete failed: ",
+    selectFirmware: "Select firmware file",
+    otaUploading: "Updating firmware...",
+    otaFail: "OTA failed: ",
+    rebooting: "Device rebooting... please refresh later",
+    success: "Update success"
+  }
+};
+
+const T = TEXT[LANG];
+
+// UI 文本
+document.getElementById('file-title').textContent = T.file;
+document.getElementById('ota-title').textContent  = T.ota;
+document.getElementById('btn-upload').textContent = T.upload;
+document.getElementById('btn-delete').textContent = T.del;
+document.getElementById('btn-flash').textContent  = T.flash;
+
+function showOverlay(msg){
+  overlay.textContent = msg;
+  overlay.classList.add('show');
+}
+function hideOverlay(){ overlay.classList.remove('show'); }
+function setStatus(msg){ status.textContent = msg; }
+
+async function uploadFile() {
+  const f = document.getElementById('file-input').files[0];
+  if (!f) return setStatus(T.selectFile);
+
+  if (f.name !== 'index.html' && f.name !== 'QRcode.jpg')
+    return setStatus(T.invalidFile);
+
+  showOverlay(T.uploading);
+  setStatus("");
+
+  const fd = new FormData();
+  fd.append('upload', f);
+
+  try {
+    const r = await fetch('/upload', { method:'POST', body:fd });
+    setStatus(await r.text());
+  } catch(e) {
+    setStatus(T.uploadFail + e);
+  }
+
+  hideOverlay();
+}
+
+async function deleteFile() {
+  const name = document.getElementById('del-name').value.trim();
+  if (!name) return setStatus(T.enterName);
+
+  const fd = new FormData();
+  fd.append('filename', name);
+
+  try {
+    const r = await fetch('/delete', { method:'POST', body:fd });
+    setStatus(await r.text());
+  } catch(e) {
+    setStatus(T.deleteFail + e);
+  }
+}
+
+async function uploadFirmware() {
+  const f = document.getElementById('fw-input').files[0];
+  if (!f) return setStatus(T.selectFirmware);
+
+  showOverlay(T.otaUploading);
+  setStatus("");
+
+  const fd = new FormData();
+  fd.append('update', f);
+
+  try {
+    const r = await fetch('/update', { method:'POST', body:fd });
+    const msg = await r.text();
+
+    if (msg === 'OK') {
+      showOverlay(T.success + "\n" + T.rebooting);
+    } else {
+      hideOverlay();
+      setStatus(T.otaFail + msg);
+    }
+  } catch(e) {
+    showOverlay(T.rebooting);
+  }
+}
+</script>
+
+</body>
+</html>
