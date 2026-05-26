@@ -64,6 +64,7 @@ void handleFileDelete() {
 
 // ------------------------------------------------------------
 void handleNotFound() {
-  server.sendHeader("Location", "/", true);
+  // 强制跳转到主页，使用绝对地址对 Captive Portal 更友好
+  server.sendHeader("Location", "http://192.168.4.1/", true);
   server.send(302, "text/plain", "");
 }

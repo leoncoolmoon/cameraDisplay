@@ -1,7 +1,7 @@
 //replace: \ESP32_USB_STREAM\src\original\include\arduino_config.h
 #define CONFIG_USB_PROC_TASK_STACK_SIZE 4096    // 增大栈大小
 #define CONFIG_USB_PROC_TASK_PRIORITY 5
-#define CONFIG_USB_PROC_TASK_CORE 1 //S2:0 S3:1
+#define CONFIG_USB_PROC_TASK_CORE 0 //S2:0 S3:1
 
 // 采样处理任务
 #define CONFIG_SAMPLE_PROC_TASK_STACK_SIZE 4096 // 增大
