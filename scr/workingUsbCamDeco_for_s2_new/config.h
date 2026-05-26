@@ -3,7 +3,7 @@
 // ── WiFi AP ──────────────────────────────────────────────────
 #define WIFI_SSID       "ESP32-Camera-AP"
 #define WIFI_PASSWORD   "1234567890"
-#define WIFI_HIDDEN     true   // 隐藏 SSID
+#define WIFI_HIDDEN     0   // 隐藏 SSID
 
 // ── GPIO ─────────────────────────────────────────────────────
 #define BUTTON_PIN      0

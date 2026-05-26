@@ -6,6 +6,7 @@
 
 #include "pin.h"        // TFT 引脚定义（S2_MINI / FEATHER32_S3）
 #include "config.h"     // 宏常量
+#include "qRcode.h"     // 内嵌 QR 码 JPEG（fallback）
 #include "wifi_ap.h"    // WiFi / DNS / HTTP server（含 web_handlers, ota_handler）
 
 /*
@@ -81,21 +82,31 @@ void lcdBlackScreen() {
   lcdBlacked = true;
 }
 
-void drawJPEGFromFS(const char *path) {
-  if (!LittleFS.exists(path)) return;
-  File f = LittleFS.open(path, "r");
-  size_t size = f.size();
-  uint8_t *buf = (uint8_t *)malloc(size);
-  if (buf) {
-    f.read(buf, size);
-    if (jpeg.openRAM(buf, size, drawMCUs)) {
-      jpeg.setPixelType(RGB565_BIG_ENDIAN);
-      jpeg.decode(0, 0, 0);
-      jpeg.close();
-    }
-    free(buf);
+// yOffset: 顶部文字占用的像素高度，JPEG 从该 y 坐标开始绘制
+void drawJPEG(uint8_t *buf, size_t size, int yOffset) {
+  if (jpeg.openRAM(buf, size, drawMCUs)) {
+    jpeg.setPixelType(RGB565_BIG_ENDIAN);
+    jpeg.decode(0, yOffset, 0);  // decode(x, y, flags)
+    jpeg.close();
   }
-  f.close();
+}
+
+void drawJPEGFromFS(const char *path, int yOffset = 0) {
+  if (LittleFS.exists(path)) {
+    File f = LittleFS.open(path, "r");
+    size_t size = f.size();
+    uint8_t *buf = (uint8_t *)malloc(size);
+    if (buf) {
+      f.read(buf, size);
+      drawJPEG(buf, size, yOffset);
+      free(buf);
+    }
+    f.close();
+  } else {
+    // 回退：使用内嵌 QRCODE[]
+    Serial.println("[LCD] QRcode.jpg not found, using built-in");
+    drawJPEG((uint8_t *)QRCODE, sizeof(QRCODE), yOffset);
+  }
 }
 
 // ============================================================
@@ -289,9 +300,11 @@ void loop() {
     lcd.fillScreen(TFT_BLACK);
     lcd.setTextColor(TFT_WHITE, TFT_BLACK);
     lcd.setFont(FONT_12x16);
-    lcd.setCursor(10, 10);
+    // FONT_12x16 高度 16px，y=2 留少量上边距
+    lcd.setCursor(2, 2);
     lcd.printf("SSID: %s", WIFI_SSID);
-    drawJPEGFromFS("/QRcode.jpg");
+    // 文字区：16px 高 + 4px 间距 = 从 y=20 开始画图
+    drawJPEGFromFS("/QRcode.jpg", 20);
   }
 
   // 3. 有客户端连上 → 确保 LCD 黑屏（只触发一次）

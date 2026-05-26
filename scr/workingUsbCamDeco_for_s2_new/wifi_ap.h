@@ -37,8 +37,10 @@ static bool serverStarted = false;
 void wifiApStart() {
   int channel = random(1, 14);
   WiFi.mode(WIFI_AP);
+  delay(100);  // 等待 WiFi modem 稳定，防止立即调用 softAPConfig 导致重启
   WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
   WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, channel, WIFI_HIDDEN);
+  delay(100);  // 等待 AP 完全起来再启动 DNS
   dnsServer.start(53, "*", apIP);
   Serial.printf("[WiFi] AP started  ch=%d  hidden=%d  IP=%s\n",
                 channel, WIFI_HIDDEN, apIP.toString().c_str());
