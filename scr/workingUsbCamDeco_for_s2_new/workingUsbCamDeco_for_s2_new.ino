@@ -233,27 +233,16 @@ void setup() {
   lcd.println("Booting...");
 
   // ── LittleFS ─────────────────────────────────────────────
-  // 先尝试挂载，不自动格式化
-  if (!LittleFS.begin(false)) {
-    Serial.println("[FS] Mount failed, formatting...");
-    lcd.println("FS formatting...");
-    
-    // 挂载失败才手动格式化，格式化完再挂载一次
-    if (!LittleFS.format() || !LittleFS.begin(false)) {
-      Serial.println("[FS] Fatal: cannot mount LittleFS");
-      lcd.println("FS FATAL!");
-      while(true) vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-    Serial.println("[FS] Formatted and mounted OK");
-    lcd.println("FS formatted OK");
+  if (!LittleFS.begin(true)) {
+    Serial.println("[FS] Mount failed");
+    lcd.println("FS Error!");
   } else {
-    Serial.println("[FS] Mounted OK");
+    Serial.println("[FS] Mounted");
     lcd.println("FS OK");
   }
 
-  // ── HTTP Server 路由（WiFi 未启动时也先注册好）───────────
-  wifiServerSetup();
-  // WiFi AP 默认不启动，等短按按钮再开
+  // ── HTTP Server 路由提前注册（server.begin 在首次开启 WiFi 时才调用）
+  wifiServerRegisterRoutes();
 
   // ── 帧缓冲 + 互斥锁 ──────────────────────────────────────
   frameMutex     = xSemaphoreCreateMutex();
