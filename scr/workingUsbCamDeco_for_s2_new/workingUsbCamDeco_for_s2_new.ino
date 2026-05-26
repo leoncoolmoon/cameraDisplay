@@ -3,6 +3,7 @@
 #include <bb_spi_lcd.h>
 #include "JPEGDEC.h"
 #include "USB_STREAM.h"
+#include "esp_heap_caps.h"
 
 #include "pin.h"        // TFT 引脚定义（S2_MINI / FEATHER32_S3）
 #include "config.h"     // 宏常量
@@ -39,6 +40,7 @@ bool wifiEnabled  = false;  // 默认不开启，短按再打开
 bool lcdBlacked   = false;  // 有客户端连上后 LCD 黑屏，之后不再更新
 bool showingQR    = false;  // WiFi 首次打开且无人连时显示过 QR 后置 true
 bool streamPaused = false;  // OTA / 文件上传期间暂停推流
+bool hasStation   = false;  // 是否有客户端连接
 
 // ============================================================
 // 帧缓冲（摄像头回调 ↔ Web 流共享）
@@ -115,18 +117,14 @@ void drawJPEGFromFS(const char *path, int yOffset = 0) {
 static void onCameraFrameCallback(uvc_frame *frame, void *) {
   digitalWrite(LED_FRAME_IND, HIGH);
 
-  bool hasClient = wifiEnabled && (WiFi.softAPgetStationNum() > 0);
-
-  if (wifiEnabled && !hasClient) {
+  if (wifiEnabled && !hasStation) {
     // WiFi 开启但无人连接：保持 QR 显示，跳过帧处理
     digitalWrite(LED_FRAME_IND, LOW);
     return;
   }
 
-  if (hasClient) {
+  if (hasStation) {
     // 有客户端：只更新 webBuffer，不碰 LCD
-    if (!lcdBlacked) lcdBlackScreen();
-
     if (!streamPaused && frameMutex && webFrameBuffer) {
       if (xSemaphoreTake(frameMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
         size_t len = min((size_t)frame->data_bytes, (size_t)UVC_BUF_SIZE);
@@ -152,6 +150,13 @@ static void onCameraFrameCallback(uvc_frame *frame, void *) {
 // OTA / 上传期间 streamPaused=true，不推帧但保持连接
 // ============================================================
 void handleStream() {
+  static bool isStreaming = false;
+  if (isStreaming) {
+    server.send(429, "text/plain", "Busy");
+    return;
+  }
+  isStreaming = true;
+
   WiFiClient client = server.client();
   client.print("HTTP/1.1 200 OK\r\n"
                "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n");
@@ -172,6 +177,7 @@ void handleStream() {
     }
     vTaskDelay(pdMS_TO_TICKS(50));  // ~20fps 上限
   }
+  isStreaming = false;
 }
 
 // ============================================================
@@ -257,9 +263,13 @@ void setup() {
 
   // ── 帧缓冲 + 互斥锁 ──────────────────────────────────────
   frameMutex     = xSemaphoreCreateMutex();
-  webFrameBuffer = (uint8_t *)malloc(UVC_BUF_SIZE);
+  webFrameBuffer = (uint8_t *)heap_caps_malloc(UVC_BUF_SIZE, MALLOC_CAP_SPIRAM);
   if (!webFrameBuffer) {
-    Serial.println("[MEM] webFrameBuffer alloc FAILED");
+    Serial.println("[MEM] webFrameBuffer PSRAM alloc FAILED, try SRAM");
+    webFrameBuffer = (uint8_t *)malloc(UVC_BUF_SIZE);
+  }
+  if (!webFrameBuffer) {
+    Serial.println("[MEM] webFrameBuffer ALLOC FAILED");
     lcd.println("BUF ALLOC FAIL!");
   }
 
@@ -291,11 +301,18 @@ void setup() {
 // Loop
 // ============================================================
 void loop() {
+  // 0. 更新状态
+  if (wifiEnabled) {
+    hasStation = (WiFi.softAPgetStationNum() > 0);
+  } else {
+    hasStation = false;
+  }
+
   // 1. 按钮事件
   handleButtonEvent();
 
   // 2. WiFi 首次打开且无人连接 → 显示 QR（每次 WiFi 打开仅一次）
-  if (wifiEnabled && !showingQR && WiFi.softAPgetStationNum() == 0) {
+  if (wifiEnabled && !showingQR && !hasStation) {
     showingQR = true;
     lcd.fillScreen(TFT_BLACK);
     lcd.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -308,7 +325,7 @@ void loop() {
   }
 
   // 3. 有客户端连上 → 确保 LCD 黑屏（只触发一次）
-  if (wifiEnabled && WiFi.softAPgetStationNum() > 0 && !lcdBlacked) {
+  if (wifiEnabled && hasStation && !lcdBlacked) {
     lcdBlackScreen();
   }
 
