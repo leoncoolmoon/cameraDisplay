@@ -233,11 +233,21 @@ void setup() {
   lcd.println("Booting...");
 
   // ── LittleFS ─────────────────────────────────────────────
-  if (!LittleFS.begin(true)) {
-    Serial.println("[FS] Mount failed");
-    lcd.println("FS Error!");
+  // 先尝试挂载，不自动格式化
+  if (!LittleFS.begin(false)) {
+    Serial.println("[FS] Mount failed, formatting...");
+    lcd.println("FS formatting...");
+    
+    // 挂载失败才手动格式化，格式化完再挂载一次
+    if (!LittleFS.format() || !LittleFS.begin(false)) {
+      Serial.println("[FS] Fatal: cannot mount LittleFS");
+      lcd.println("FS FATAL!");
+      while(true) vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    Serial.println("[FS] Formatted and mounted OK");
+    lcd.println("FS formatted OK");
   } else {
-    Serial.println("[FS] Mounted");
+    Serial.println("[FS] Mounted OK");
     lcd.println("FS OK");
   }
 
